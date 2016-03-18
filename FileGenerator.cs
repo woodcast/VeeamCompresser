@@ -22,7 +22,7 @@ namespace com.veeam.Compresser
                     0xF, 0xA, 0xF, 0xA, 0xF, 0xA, 0xF, 0xD,
                 };
 
-                for (int i = 0; i < 1024 * 256 + 16; i += 16)
+                for (int i = 0; i < 1024 * 1024 * 5 + 16; i += 16)
                 {
                     writer.Write(arr);
                 }

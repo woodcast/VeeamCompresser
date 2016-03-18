@@ -12,7 +12,7 @@ namespace com.veeam.Compresser.FileMapping
     /// </summary>
     sealed class FileMappingViewAccessor : IDisposable
     {
-        private bool disposed = false;
+        private bool _disposed = false;
 
         internal FileMappingViewAccessor(SafeFileMappingViewHandle handle, long offset, long capacity)
         {
@@ -68,6 +68,8 @@ namespace com.veeam.Compresser.FileMapping
         /// Reads a 32-bit integer from the accessor.
         /// </summary>
         /// <param name="position"></param>
+        /// <param name="bytes"></param>
+        /// <param name="size"></param>
         /// <returns></returns>
         public int ReadBytes(long position, byte[] bytes, int size)
         {
@@ -158,6 +160,24 @@ namespace com.veeam.Compresser.FileMapping
             Marshal.Copy(new byte[] { value }, 0, new IntPtr(Address.ToInt64() + position), 1);
         }
 
+        /// <summary>
+        /// Writes a byte array into the accessor.
+        /// </summary>
+        /// <param name="position">Position from which...</param>
+        /// <param name="bytes">Bytes to write...</param>
+        /// <param name="size">Bytes array length</param>
+        /// <returns>Size of array..</returns>
+        public int WriteBytes(long position, byte[] bytes, int size)
+        {
+            if (position < 0 || position >= Capacity)
+                throw new ArgumentOutOfRangeException("position");
+            if (size < 0 || position + size > Capacity)
+                throw new ArgumentOutOfRangeException("size");
+
+            Marshal.Copy(bytes, 0, new IntPtr(Address.ToInt64() + position), size);
+
+            return size;
+        }
 
         /// <summary>
         /// Writes a structure into the accessor.
@@ -191,12 +211,12 @@ namespace com.veeam.Compresser.FileMapping
         public void Dispose()
         {
             // TODO: implement
-            if (!disposed)
+            if (!_disposed)
             {
                 IDisposable disposable = FileMappingViewHandle;
                 if (disposable != null)
                     disposable.Dispose();
-                disposed = true;
+                _disposed = true;
             }
         }
     }

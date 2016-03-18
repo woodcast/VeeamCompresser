@@ -16,9 +16,9 @@ namespace com.veeam.Compresser.FileMapping
     /// </summary>
     sealed class FileMappingWrapper : IDisposable
     {
-        private bool disposed = false;
+        private bool _disposed = false;
 
-        private long fileSize = -1;
+        private long _fileSize = -1;
 
         private FileMappingWrapper(SafeFileMappingHandle handle)
         {
@@ -112,7 +112,7 @@ namespace com.veeam.Compresser.FileMapping
             // UnauthorizedAccessException
             // IOException
             var wrapper = new FileMappingWrapper(handle);
-            wrapper.fileSize = fileStream.Length;
+            wrapper._fileSize = fileStream.Length;
 
             return wrapper;
         }
@@ -137,8 +137,8 @@ namespace com.veeam.Compresser.FileMapping
         /// </param>
         /// <returns>A randomly accessible block of memory.</returns>
         public FileMappingViewAccessor CreateViewAccessor(long offset, long size)
-        {            
-            long lengthFromOffsetToTheEnd = (size == 0) ? this.fileSize - offset : size;
+        {
+            long lengthFromOffsetToTheEnd = (size == 0) ? this._fileSize - offset : size;
 
             SafeFileMappingViewHandle handle = new SafeFileMappingViewHandle(Win32.MapViewOfFile(
                 this.FileMappingHandle,
@@ -170,7 +170,7 @@ namespace com.veeam.Compresser.FileMapping
         /// <returns>A stream of memory that has the specified offset and size.</returns>
         public FileMappingViewStream CreateViewStream(long offset, long size)
         {
-            long lengthFromOffsetToTheEnd = (size == 0) ? this.fileSize - offset : size;
+            long lengthFromOffsetToTheEnd = (size == 0) ? this._fileSize - offset : size;
 
             // TODO: implement
             SafeFileMappingViewHandle handle = 
@@ -183,12 +183,12 @@ namespace com.veeam.Compresser.FileMapping
         public void Dispose()
         {
             // TODO: implement
-            if (!disposed)
+            if (!_disposed)
             {
                 IDisposable disposable = FileMappingHandle;
                 if (disposable != null)
                     disposable.Dispose();
-                disposed = true;
+                _disposed = true;
             }
         }
     }

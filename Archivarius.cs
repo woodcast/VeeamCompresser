@@ -1,66 +1,130 @@
 ﻿using com.veeam.Compresser.FileMapping;
 using System;
-using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
-using System.Text;
+using System.Threading;
+using FixedThreadPoolApplication.Util;
+using NLog;
 
 namespace com.veeam.Compresser
 {
     public class Archivarius
     {
-        SourceReader reader;
-        DestinationWriter writer;
+        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        Queue<Block> preparedBlocks = new Queue<Block>();
-        Queue<Block> compressedBlocks = new Queue<Block>();
+        readonly SourceReader _reader;
+        readonly DestinationWriter _writer;
 
-        public Archivarius(SourceReader reader, DestinationWriter writer)
+        Thread[] _threads;
+        readonly int _nThreads;
+
+        readonly object _syncRead = new object();
+        readonly object _syncWrite = new object();
+        private int _granularity;
+        private long _compressedBlockLength;
+
+        public Archivarius(SourceReader reader, DestinationWriter writer, int nThreads, int allocationGranularity)
         {
-            this.reader = reader;
-            this.writer = writer;
+
+            if (nThreads <= 0)
+                throw new ArgumentOutOfRangeException("nThreads",
+                    "nThreads must be in range [1; MAX_NUMBER_OF_THREADS]");
+
+            _reader = reader;
+            _writer = writer;
+
+            _nThreads = nThreads;
+            _granularity = allocationGranularity;
         }
 
-        /// <summary>
-        /// Паттерн шаблонный метод (задает алгоритм).
-        /// </summary>
+
+        private void RunTask()
+        {
+
+            // ReSharper disable once InconsistentlySynchronizedField
+            while (_reader.HasNext())
+            {
+                Block block;
+
+                lock (_syncRead)
+                {
+                    if (!_reader.HasNext())
+                        return;
+
+                    block = _reader.NextBlock();
+                }
+
+                Logger.Info("[{1}] block readed: {0}", block.ToString(), Thread.CurrentThread.Name);
+//                WriteMessageToUser("block readed: [{1}] {0}", block.ToString(), Thread.CurrentThread.Name);
+
+                Block blockToWrite = doOperation(block);
+
+                Thread.Sleep(200);
+
+                lock (_syncWrite)
+                {
+                    _writer.WriteNext(blockToWrite);
+                }
+
+                Logger.Info("[{1}] block written: {0}", block.ToString(), Thread.CurrentThread.Name);
+//                WriteMessageToUser("block written [{1}]: {0}", block.ToString(), Thread.CurrentThread.Name);
+
+            }
+        }
+
+        private Block doOperation(Block block)
+        {
+            Block blockToWrite;
+            using (var compressedBlock = new MemoryStream())
+            using (var compressor = new GZipStream(compressedBlock, CompressionMode.Compress))
+            {
+                compressor.Write(block.Data, 0, block.Data.Length);
+                byte[] tempBytes = compressedBlock.ToArray();
+
+                blockToWrite = new Block
+                {
+                    Id = block.Id,
+                    Offset = block.Id * _compressedBlockLength,
+                    Data = tempBytes
+                };
+            }
+            return blockToWrite;
+        }
+
         public void Run()
         {
-            while (reader.HasNext())
+            FileInfo fileInfo = new FileInfo(_reader.Path);
+            Block block = _reader.NextBlock();
+            Block compressedblock = doOperation(block);          
+
+            long destFileSize = fileInfo.Length/_granularity*compressedblock.Data.Length;
+            _compressedBlockLength = compressedblock.Data.Length;
+            
+            Logger.Info("Source file size is {0}", fileInfo.Length);
+            Logger.Info("Destination file size is {0}", destFileSize);
+            Logger.Info("Number of blocks is {0} with granularity={1}", fileInfo.Length / _granularity, _granularity);
+            Logger.Info("Size of compressed block is {0}", compressedblock.Data.Length);
+
+            _writer.OpenMappingFile(destFileSize, _compressedBlockLength);
+            _writer.WriteNext(compressedblock);
+
+
+            _threads = new Thread[_nThreads];
+            for (int i = 0; i < _nThreads; i++)
             {
-                Block block = reader.ReadNext();
-                preparedBlocks.Enqueue(block);
+                Thread t = new Thread(RunTask) {Name = "thread_" + i + 1};
+                Logger.Info("starting thread {0}", t.Name);
+                _threads[i] = t;
+                t.Start();
             }
 
-            while (preparedBlocks.Count > 0)
-            {
-                Block block = preparedBlocks.Dequeue();
-                using (var compressedBlock = new MemoryStream())
-                using (var compressor = new GZipStream(compressedBlock, CompressionMode.Compress))
-                {
-                    compressor.Write(block.Data, 0, block.Data.Length);
-                    compressedBlocks.Enqueue(
-                        new Block
-                        {
-                            Id = block.Id,
-                            Offset = block.Offset,                            
-                            Data = compressedBlock.ToArray()
-                        });
-                }
-            }
-
-            while (compressedBlocks.Count > 0)
-            {
-                Block block = compressedBlocks.Dequeue();
-                writer.WriteNext(block);
-            }
         }
 
 
 
         public static void Main(string[] args)
-        {
+        {            
             string path = args[1]; // source file;
 
             if (!File.Exists(path))
@@ -77,9 +141,11 @@ namespace com.veeam.Compresser
             WriteMessageToUser("ProcessorArchitecture: {0}", info.ProcessorArchitecture);
 
             SourceReader reader = new SourceReader(path, (int)info.AllocationGranularity * 2);
-            DestinationWriter writer = new DestinationWriter(path);
-            Archivarius archivarius = new Archivarius(reader, writer);
+            DestinationWriter writer = new DestinationWriter(path, (int)info.AllocationGranularity);
+            Archivarius archivarius = new Archivarius(reader, writer, (int)info.NumberOfProcessors, (int)info.AllocationGranularity);
             archivarius.Run();
+
+            Console.ReadLine();
         }
 
         private static void WriteMessageToUser(string message, params object[] para)

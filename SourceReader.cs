@@ -4,12 +4,18 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using NLog;
 
 namespace com.veeam.Compresser
 {
     public sealed class SourceReader : IDisposable
     {
-        FileMappingWrapper fileMapping;
+        readonly FileMappingWrapper _fileMapping;
+
+        long _offset = 0;
+        long _length;
+        int _bytesInBlock;
+        private int _currentId = -1; // starts from zero
 
         internal SourceReader(string path, int granularity)
         {
@@ -17,36 +23,35 @@ namespace com.veeam.Compresser
             this.Granularity = granularity;
 
             // можно использовать лэйзи.
-            fileMapping = FileMappingWrapper.CreateFromFile(Path);
+            _fileMapping = FileMappingWrapper.CreateFromFile(Path);
 
-            offset = 0;
-            length = new FileInfo(Path).Length;
-            bytesInBlock = Granularity;
+            _offset = 0;
+            _length = new FileInfo(Path).Length;
+            _bytesInBlock = Granularity;
         }
 
-        long offset = 0;
-        long length;
-        int bytesInBlock;
 
-        public Block ReadNext()
+        public Block NextBlock()
         {
-            if (length > 0)
+            if (_length > 0)
             {
-                if (length < bytesInBlock)
-                    bytesInBlock = (int)length;
+                if (_length < _bytesInBlock)
+                    _bytesInBlock = (int)_length;
 
-                byte[] block = new byte[bytesInBlock];
-                using (var accessor = fileMapping.CreateViewAccessor(offset, bytesInBlock))
+                byte[] block = new byte[_bytesInBlock];
+
+                using (var accessor = _fileMapping.CreateViewAccessor(_offset, _bytesInBlock))
                 {
-                    accessor.ReadBytes(0, block, bytesInBlock);
+                    accessor.ReadBytes(0, block, _bytesInBlock);
                 }
 
                 //WriteMessageToUser("offset: {0}, length: {1}", offset, length);
 
-                offset += bytesInBlock;
-                length -= bytesInBlock;
+                _currentId += 1;
+                _offset += _bytesInBlock;
+                _length -= _bytesInBlock;
 
-                return new Block { Id = 0, Offset = offset, Data = block };
+                return new Block { Id = _currentId, Offset = _offset, Data = block };
             }
             else
                 throw new Exception("The end");
@@ -58,15 +63,15 @@ namespace com.veeam.Compresser
 
         public void Dispose()
         {
-            if (fileMapping != null)
+            if (_fileMapping != null)
             {
-                fileMapping.Dispose();
+                _fileMapping.Dispose();
             }
         }
 
         internal bool HasNext()
         {
-            return length > 0;
+            return _length > 0;
         }
     }
 }

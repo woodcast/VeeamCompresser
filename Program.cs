@@ -45,7 +45,6 @@ namespace com.veeam.Compresser
 
                     using (var accessor = fileMapping.CreateViewAccessor(offset, bytesInBlock))
                     {
-
                         byte[] block = new byte[bytesInBlock];
                         accessor.ReadBytes(0, block, bytesInBlock);
                         compressor.Write(block, 0, bytesInBlock);
